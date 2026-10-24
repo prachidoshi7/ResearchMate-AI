@@ -68,12 +68,12 @@ app.add_middleware(
 )
 
 model = SentenceTransformer(
-    "all-MiniLM-L6-v2",
+    "sentence-transformers/all-MiniLM-L6-v2",
     device="cpu"
 )
-
 model.eval()
-torch.set_num_threads(2)
+torch.set_num_threads(1)
+
 
 class SearchRequest(BaseModel):
     query: str = Field(min_length=2, max_length=1000)
