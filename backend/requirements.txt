@@ -5,5 +5,4 @@ PyMuPDF
 numpy
 google-genai
 python-dotenv
-sentence-transformers
 supabase

@@ -1,18 +1,15 @@
-import torch
 import os
 import re
 import time
 
 import fitz
 import numpy as np
-
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from sentence_transformers import SentenceTransformer
 from supabase import create_client, Client
 
 from app.text_chunker import chunk_text
@@ -36,6 +33,37 @@ gemini_client = genai.Client(
 )
 
 GEMINI_MODEL = "gemini-2.5-flash"
+EMBEDDING_MODEL = "gemini-embedding-001"
+
+def generate_embeddings(texts, task_type):
+    try:
+        embeddings = []
+
+        for text in texts:
+            result = gemini_client.models.embed_content(
+                model=EMBEDDING_MODEL,
+                contents=text,
+                config=types.EmbedContentConfig(
+                    task_type=task_type,
+                    output_dimensionality=384,
+                ),
+            )
+
+            embeddings.append(result.embeddings[0].values)
+
+        embeddings = np.asarray(embeddings, dtype=np.float32)
+
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+        embeddings = embeddings / np.maximum(norms, 1e-12)
+
+        return embeddings
+
+    except Exception as exc:
+        print(f"Embedding API error: {exc}")
+        raise HTTPException(
+            status_code=502,
+            detail="Could not generate text embeddings. Please try again.",
+        ) from exc
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY")
@@ -66,15 +94,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-model = SentenceTransformer(
-    "sentence-transformers/all-MiniLM-L6-v2",
-    device="cpu"
-)
-model.eval()
-torch.set_num_threads(1)
-
-
 class SearchRequest(BaseModel):
     query: str = Field(min_length=2, max_length=1000)
     top_k: int = Field(default=5, ge=1, le=10)
@@ -160,12 +179,9 @@ async def upload_paper(file: UploadFile = File(...)):
         )
 
     # 3. Generate embeddings.
-    embeddings = model.encode(
-        chunks,
-        normalize_embeddings=True,
-        show_progress_bar=False
-    )
-
+    embeddings = generate_embeddings(
+    chunks, task_type="RETRIEVAL_DOCUMENT"
+)
     # 4. Prepare database records.
     records = []
 
@@ -216,13 +232,9 @@ async def upload_paper(file: UploadFile = File(...)):
 
 @app.post("/search-paper")
 def search_paper(request: SearchRequest):
-
-    query_embedding = model.encode(
-        request.query,
-        normalize_embeddings=True,
-        show_progress_bar=False
-    )
-
+    query_embedding = generate_embeddings(
+        [request.query], task_type="RETRIEVAL_QUERY"
+    )[0]
     try:
         response = supabase.rpc(
             "match_paper_chunks",
@@ -260,11 +272,9 @@ def ask_research_question(request: AskRequest):
     # 1. Embed the question.
     total_start = time.perf_counter()
     start_time = time.perf_counter()
-    query_embedding = model.encode(
-        request.question,
-        normalize_embeddings=True,
-        show_progress_bar=False
-    )
+    query_embedding = generate_embeddings(
+        [request.question], task_type="RETRIEVAL_QUERY"
+    )[0]    
     print(f"Embedding time: {time.perf_counter() - start_time:.2f}s")
     # 2. Retrieve relevant passages from Supabase.
     search_start = time.perf_counter()
