@@ -199,8 +199,8 @@ async def upload_paper(file: UploadFile = File(...)):
 
     # 5. Replace existing chunks for this filename.
     try:
-        supabase.table("paper_chunks").delete().eq(
-            "filename", file.filename
+        supabase.table("paper_chunks").delete().gte(
+            "chunk_index", 0
         ).execute()
 
         # Insert records in batches.
