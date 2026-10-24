@@ -42,3 +42,4 @@ uploads/
 # Coverage and test files
 .coverage
 htmlcov/
+backend/main_backup.py
